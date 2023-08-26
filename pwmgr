@@ -1,0 +1,211 @@
+#!/usr/bin/bash
+
+readonly MIN_PASSWORD_LENGTH=12
+readonly CONFIG_PATH="$HOME/.pwmgr"
+readonly KEY_PATH="$CONFIG_PATH/key"
+readonly VAULT_PATH="$CONFIG_PATH/vault"
+
+verbose=false
+
+function abort {
+  msg=$1
+  echo -e $msg
+  exit 1
+}
+
+function usage {
+  cat <<EOF
+Password Manager (pwmgr)
+
+Command-line utility to manage passwords securely.
+
+Usage:
+  pwmgr -r <resource>                     Retrieve a password for a resource
+  pwmgr -p <password>                     Store a password without a resource (e.g., master password)
+
+Options:
+  -r <resource>   Specify the resource (e.g., website, service)
+  -p <password>   Specify the password to store or retrieve
+
+Examples:
+  pwmgr 
+    Retrive all resources and it's password
+
+  pwmgr -r gmail -p mysecretpassword
+    Store a password for the 'gmail' resource.
+  
+  pwmgr -r gmail
+    Retrieve the password for the 'gmail' resource.
+
+  pwmgr -p mysecretpassword
+    Retrieve the resource which has the 'mysecretpassword' password
+
+Note:
+  Passwords are securely stored using encryption.
+EOF
+
+  abort
+}
+
+function validate_password {
+  local password="$1"
+  local haystack="$2"
+  
+  if [ "$verbose" == "true" ]; then
+    echo "[] Validating $haystack length"
+  fi
+
+  if [[ ${#password} -lt MIN_PASSWORD_LENGTH ]]; then
+    abort "$haystack must be at least \`$MIN_PASSWORD_LENGTH\` characters"
+  fi
+
+  if [ "$verbose" == "true" ]; then
+    echo "[] Validating if $haystack contains at least one lowercase letter"
+  fi
+
+  if [[ ! $password =~ [a-z] ]]; then
+    abort "$haystack must contains at least one lowercase letter"
+  fi
+
+  if [ "$verbose" == "true" ]; then
+    echo "[] Validating if $haystack contains at least one uppercase letter"
+  fi
+
+  if [[ ! $password =~ [A-Z] ]]; then
+    abort "$haystack must contains at least one uppercase letter"
+  fi
+
+  if [ "$verbose" == "true" ]; then
+    echo "[] Validating if $haystack contains at least one digit"
+  fi
+
+  if [[ ! $password =~ [0-9] ]]; then
+    abort "$haystack must contains at least one digit"
+  fi
+
+  if [ "$verbose" == "true" ]; then
+    echo "[] Validating if $haystack contains at least one special character"
+  fi
+
+  if [[ ! $password =~ ["!@#\$%\^&*()-=_+]" ]]; then
+    abort "$haystack must include at least one special character."
+  fi
+}
+
+function validate_config_path  {
+  if [ "$verbose" == "true" ]; then
+    echo "[] Verifying existency of \`$CONFIG_PATH\`"
+  fi
+
+  if [ ! -d "$CONFIG_PATH" ]; then 
+    if [ "$verbose" == "true" ]; then
+      echo -e "\r\n[] Creating \`$CONFIG_PATH\`"
+    fi
+
+    mkdir "$CONFIG_PATH"; 
+  fi
+
+  if [ ! -e "$VAULT_PATH" ]; then 
+    local permissions=600
+
+    if [ "$verbose" == "true" ]; then
+      echo "[] Creating \`$CONFIG_PATH\` with \`$permissions\` permissions "
+    fi
+
+    touch "$VAULT_PATH" && chmod $permissions "$VAULT_PATH"
+  fi
+}
+
+function validate_key {
+  validate_config_path
+
+  if [ ! -e "$KEY_PATH" ]; then 
+    if [ "$verbose" == "true" ]; then
+      echo -en "\r\nDefine your vault key: "
+    else
+      echo -n "Define your vault key: "
+    fi
+
+    read -r key
+
+    if [ "$verbose" == "true" ]; then
+      echo -e "\r\n[] Validating vault key"
+    fi
+
+    validate_password "$key" "key"
+    touch "$KEY_PATH"
+    chmod 600 "$KEY_PATH"
+    echo "$key" > "$KEY_PATH"
+    return 0
+  fi
+
+  if [ "$verbose" == "true" ]; then
+    echo -ne "\r\nEnter your vault key: "
+  else
+    echo -n "Enter your vault key: "
+  fi
+
+  read -r key
+
+  if [ "$verbose" == "true" ]; then
+    echo -e "\r\n[] Validating vault key"
+  fi
+
+  if [ "$key"  != `cat "$KEY_PATH"` ]; then
+    abort "Incorrect key \`$key\`"
+  fi
+
+  echo "$key" > "$KEY_PATH"
+}
+
+function main {
+  local resource=""
+  local password=""
+
+  if [ $# -eq 0 ]; then 
+    validate_key && cat $VAULT_PATH && return 0
+  fi
+
+  while getopts ":r:p:v" opt; do
+    case $opt in 
+      v) verbose=true;;
+      r)
+        if [ -z "$OPTARG" ]; then usage; fi
+        resource="$OPTARG";;
+      p)
+        if [ -n "$OPTARG" ]; then 
+          password="$OPTARG"
+          validate_password "$password" "password"
+        fi;;
+      \?) usage;;
+    esac
+  done
+
+  if [[ "$resource" == "-p"  ||  "$password" == "-r" ]]; then usage; fi
+
+  validate_config_path && validate_key
+
+  if [ -n "$resource" ] && [ -z "$password" ]; then
+    if [ "$verbose" == "true" ]; then
+      echo "[] Running grep -F "$resource" "$VAULT_PATH" | awk -F ' => ' '{print \$2}'"
+    fi
+
+    grep -F "$resource" "$VAULT_PATH" | awk -F ' => ' '{print $2}'
+  elif [ -n "$password" ] && [ -z "$resource" ]; then
+    if [ "$verbose" == "true" ]; then
+      echo "[] Running grep -F "$password" "$VAULT_PATH" | awk -F ' => ' '{print \$1}'"
+    fi
+
+    grep -F "$password" "$VAULT_PATH" | awk -F ' => ' '{print $1}'
+  else
+    local content="$resource => $password"
+
+    if [ "$verbose" == "true" ]; then
+      echo "[] Writing \`$content\` to \`$VAULT_PATH\`"
+    fi
+
+    echo $content >> "$VAULT_PATH"
+  fi
+}
+
+main "$@"
