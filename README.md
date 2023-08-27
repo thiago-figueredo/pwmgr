@@ -1,7 +1,7 @@
 # Introduction
 
 pwmgr is command line utility to manage password between many resources. 
-The password are stored as plain text in the file system, and only the owner has permissions to read, write to it.
+The passwords are stored as plain text in the file system, and only the owner has permissions to read, write to it.
 
 
 # Restrictions
