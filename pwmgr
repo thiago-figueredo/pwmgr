@@ -39,9 +39,6 @@ Examples:
 
   pwmgr -p mysecretpassword
     Retrieve the resource which has the 'mysecretpassword' password
-
-Note:
-  Passwords are securely stored using encryption.
 EOF
 
   abort
@@ -93,26 +90,27 @@ function validate_password {
 }
 
 function validate_config_path  {
+  local dir_permissions=700
+  local vault_permissions=600
+
   if [ "$verbose" == "true" ]; then
     echo "[] Verifying existency of \`$CONFIG_PATH\`"
   fi
 
   if [ ! -d "$CONFIG_PATH" ]; then 
     if [ "$verbose" == "true" ]; then
-      echo -e "\r\n[] Creating \`$CONFIG_PATH\`"
+      echo "[] Creating directory \`$CONFIG_PATH\` with \`$dir_permissions\` permissions"
     fi
 
-    mkdir "$CONFIG_PATH"; 
+    mkdir -m "$dir_permissions" "$CONFIG_PATH"
   fi
 
   if [ ! -e "$VAULT_PATH" ]; then 
-    local permissions=600
-
     if [ "$verbose" == "true" ]; then
-      echo "[] Creating \`$CONFIG_PATH\` with \`$permissions\` permissions "
+      echo "[] Creating file \`$VAULT_PATH\` with \`$vault_permissions\` permissions "
     fi
 
-    touch "$VAULT_PATH" && chmod $permissions "$VAULT_PATH"
+    touch "$VAULT_PATH" && chmod $vault_permissions "$VAULT_PATH"
   fi
 }
 
@@ -151,11 +149,55 @@ function validate_key {
     echo -e "\r\n[] Validating vault key"
   fi
 
-  if [ "$key"  != `cat "$KEY_PATH"` ]; then
+  if [ "$key" != `cat "$KEY_PATH"` ]; then
     abort "Incorrect key \`$key\`"
   fi
 
   echo "$key" > "$KEY_PATH"
+}
+
+function handle_overwrite {
+  pattern=$1
+  content=$2
+
+  echo -e "\r\nNOTE: \`$pattern\` is in \`$VAULT_PATH\`"
+  read -p "Want to overwrite ? (y/N) " opt
+
+  case $opt in
+    y) sed -i "/$pattern/c\\$content" "$VAULT_PATH";;
+    *) exit 0;;
+  esac
+}
+
+function write_to_vault {
+  local resource=$1
+  local password=$2
+
+  validate_password "$password" "password"
+
+  local content="$resource => $password"
+
+  if [ "$verbose" == "true" ]; then
+    echo "[] Verifying if \`$resource\` resource is in \`$VAULT_PATH\`"
+  fi
+
+  if grep -F "$resource" "$VAULT_PATH" &> /dev/null && [ -n $resource ] && [ -n ]; then
+    handle_overwrite "$resource" "$content"
+  else
+    if [ "$verbose" == "true" ]; then
+      echo "[] Verifying if \`$password\` password is in \`$VAULT_PATH\`"
+    fi
+
+    if grep -F "$password" "$VAULT_PATH" &> /dev/null; then
+      abort "Cannot have different resource with the same password"
+    fi
+
+    if [ "$verbose" == "true" ]; then
+      echo "[] Writing \`$content\` to \`$VAULT_PATH\`"
+    fi
+
+    echo "$content" >> "$VAULT_PATH"
+  fi
 }
 
 function main {
@@ -166,6 +208,8 @@ function main {
     validate_key && cat $VAULT_PATH && return 0
   fi
 
+  if [ $# -eq 1 ] && [ "$@" == "-v" ]; then usage; fi
+
   while getopts ":r:p:v" opt; do
     case $opt in 
       v) verbose=true;;
@@ -175,7 +219,6 @@ function main {
       p)
         if [ -n "$OPTARG" ]; then 
           password="$OPTARG"
-          validate_password "$password" "password"
         fi;;
       \?) usage;;
     esac
@@ -183,29 +226,37 @@ function main {
 
   if [[ "$resource" == "-p"  ||  "$password" == "-r" ]]; then usage; fi
 
-  validate_config_path && validate_key
+  validate_key
 
   if [ -n "$resource" ] && [ -z "$password" ]; then
-    if [ "$verbose" == "true" ]; then
-      echo "[] Running grep -F "$resource" "$VAULT_PATH" | awk -F ' => ' '{print \$2}'"
-    fi
+    while IFS= read -r entry; do
+      local target_resource=`echo $entry | awk -F ' => ' '{ print $1 }'`
 
-    grep -F "$resource" "$VAULT_PATH" | awk -F ' => ' '{print $2}'
-  elif [ -n "$password" ] && [ -z "$resource" ]; then
-    if [ "$verbose" == "true" ]; then
-      echo "[] Running grep -F "$password" "$VAULT_PATH" | awk -F ' => ' '{print \$1}'"
-    fi
+      if [ "$resource" == "$target_resource" ]; then
+        local target_password=`echo $entry | awk -F ' => ' '{ print $2 }'`
+        echo $target_password
+        exit 0
+      fi
+    done < $VAULT_PATH
 
-    grep -F "$password" "$VAULT_PATH" | awk -F ' => ' '{print $1}'
-  else
-    local content="$resource => $password"
-
-    if [ "$verbose" == "true" ]; then
-      echo "[] Writing \`$content\` to \`$VAULT_PATH\`"
-    fi
-
-    echo $content >> "$VAULT_PATH"
+    exit 1
   fi
+
+  if [ -n "$password" ] && [ -z "$resource" ]; then
+    while IFS= read -r entry; do
+      local target_password=`echo $entry | awk -F ' => ' '{ print $2 }'`
+
+      if [ "$password" == "$target_password" ]; then
+        local target_resource=`echo $entry | awk -F ' => ' '{ print $1 }'`
+        echo $target_resource
+        exit 0
+      fi
+    done < $VAULT_PATH
+
+    exit 1
+  fi
+
+  write_to_vault $resource $password
 }
 
 main "$@"

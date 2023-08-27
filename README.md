@@ -1,12 +1,12 @@
-# Questions
+# Introduction
 
-- How to restore password ?
-- How to change password ?
+pwmgr is command line utility to manage password between many resources. 
+The password are stored as plain text in the file system, and only the owner has permissions to read, write to it.
 
 
-# BUGS
-- If you add & at the of the password the password is put to the background
+# Restrictions
+- different resources have different passwords.
+- password must contains at least one lowercase, uppercase, special character and digit.
 
 # Future Thoughts
-- What about command history and stdout history
-- How can a hacker can use this script to get the password of other user ?
+- Make security tests
